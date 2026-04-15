@@ -12,11 +12,10 @@
             console.log(msg);
             document.getElementById("debug").innerText += msg + "\n";
         }
-
         async function loadModel() {
             try {
                 log("Loading tokenizer...");
-                tokenizer = await AutoTokenizer.from_pretrained("./");
+                await loadTokenizer()
                 log(`Tokenizer loaded. Vocab size: ${tokenizer.vocab_size}`);
 
                 log("Loading ONNX model...");
@@ -29,15 +28,28 @@
                 console.error(e);
             }
         }
+        let vocab, reverseVocab, bpeRanks;
+
+        async function loadTokenizer() {
+            const resp = await fetch("./tokenizer.json");
+            const data = await resp.json();
+            vocab = data.model.vocab;  // token -> id
+            reverseVocab = Object.fromEntries(Object.entries(vocab).map(([k,v]) => [v,k]));
+            bpeRanks = Object.fromEntries(data.model.merges.map((m, i) => [m, i]));
+            log(`Tokenizer loaded. Vocab size: ${Object.keys(vocab).length}`);
+        }
+
+        function decode(ids) {
+            return ids.map(id => reverseVocab[id] || "").join("").replaceAll("Ġ", " ").trim();
+        }
 
         async function generate() {
             try {
                 const prompt = document.getElementById("prompt").value;
                 log(`Generating from prompt: "${prompt}"`);
 
-                const encoded = tokenizer(prompt);
-                let ids = Array.from(encoded.input_ids.data);
-                log(`Encoded ids: [${ids}]`);
+                let ids = [vocab["<s>"]];  // just start with BOS token
+                log(`Starting ids: [${ids}]`);
 
                 for (let i = 0; i < 100; i++) {
                     const tensor = new ort.Tensor("int64",
