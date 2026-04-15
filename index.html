@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RomeGPT</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.17.1/ort.min.js"></script>
+    <script type="module">
+        import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1";
+        
+        let session, tokenizer;
+
+        async function loadModel() {
+            tokenizer = await AutoTokenizer.from_pretrained("./");
+            session = await ort.InferenceSession.create("rome_gpt_quantized.onnx");
+            console.log("Model and tokenizer loaded");
+        }
+
+        async function generate() {
+            const prompt = document.getElementById("prompt").value;
+            const encoded = tokenizer(prompt);
+            let ids = Array.from(encoded.input_ids.data);
+
+            for (let i = 0; i < 100; i++) {
+                const tensor = new ort.Tensor("int64",
+                    BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
+                const out = await session.run({ input_ids: tensor });
+                const logits = out.logits.data;
+                const vocabSize = tokenizer.vocab_size;
+                const lastLogits = logits.slice((ids.length - 1) * vocabSize, ids.length * vocabSize);
+                const nextId = temperature_sample(lastLogits, 0.8);
+                if (nextId === tokenizer.eos_token_id) break;
+                ids.push(nextId);
+            }
+
+            const decoded = tokenizer.decode(ids, { skip_special_tokens: true });
+            document.getElementById("output").innerText = decoded;
+        }
+
+        function temperature_sample(logits, temp) {
+            const scaled = Array.from(logits).map(l => l / temp);
+            const maxL = Math.max(...scaled);
+            const exps = scaled.map(l => Math.exp(l - maxL));
+            const sum = exps.reduce((a, b) => a + b, 0);
+            const probs = exps.map(p => p / sum);
+            const r = Math.random();
+            let cumsum = 0;
+            for (let i = 0; i < probs.length; i++) {
+                cumsum += probs[i];
+                if (r < cumsum) return i;
+            }
+            return probs.length - 1;
+        }
+
+        // expose generate to button onclick
+        window.generate = generate;
+        loadModel();
+    </script>
+</head>
+<body>
+    <input id="prompt" type="text" placeholder="Enter prompt..." />
+    <button onclick="generate()">Generate</button>
+    <p id="output"></p>
+
+</body>
+</html>
