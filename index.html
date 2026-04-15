@@ -16,11 +16,11 @@
             try {
                 log("Loading tokenizer...");
                 await loadTokenizer()
-                log(`Tokenizer loaded. Vocab size: ${tokenizer.vocab_size}`);
+                log(`Tokenizer loaded. Vocab size: ${Object.keys(vocab).length}`);
 
                 log("Loading ONNX model...");
                 session = await ort.InferenceSession.create("rome_gpt_quantized.onnx", {
-                    executionProviders: ['webgpu']
+                    executionProviders: ['wasm']
                 });
                 log(`Model loaded. Inputs: ${session.inputNames}, Outputs: ${session.outputNames}`);
             } catch (e) {
@@ -50,23 +50,37 @@
 
                 let ids = [vocab["<s>"]];  // just start with BOS token
                 log(`Starting ids: [${ids}]`);
-
+                const vocabSize = Object.keys(vocab).length;
                 for (let i = 0; i < 100; i++) {
-                    const tensor = new ort.Tensor("int64",
-                        BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
-                    const out = await session.run({ input_ids: tensor });
-                    const logits = out.logits.data;
-                    const vocabSize = tokenizer.vocab_size;
-                    const lastLogits = logits.slice((ids.length - 1) * vocabSize, ids.length * vocabSize);
-                    const nextId = temperature_sample(lastLogits, 0.8);
-                    log(`Step ${i}: next token id = ${nextId}`);
-                    if (nextId === tokenizer.eos_token_id) {
-                        log("EOS token reached, stopping.");
+                    try {
+                        // pad to length 100 with pad token id (1)
+                        const padded = new Array(100).fill(1);
+                        ids.forEach((id, idx) => padded[idx] = id);
+                        
+                        const tensor = new ort.Tensor("int64",
+                            BigInt64Array.from(padded.map(BigInt)), [1, 100]);
+                        const out = await session.run({ input_ids: tensor });
+                        const logits = out.logits.data;
+                        const vocabSize = Object.keys(vocab).length;
+                        
+                        // get logits at position of last real token
+                        const lastPos = ids.length - 1;
+                        const lastLogits = logits.slice(lastPos * vocabSize, (lastPos + 1) * vocabSize);
+                        
+                        const nextId = temperature_sample(lastLogits, 0.8);
+                        log(`Step ${i}: next token id = ${nextId}`);
+                        if (nextId === vocab["</s>"]) {
+                            log("EOS reached");
+                            break;
+                        }
+                        ids.push(nextId);
+                        if (ids.length >= 30) break;
+                    } catch(e) {
+                        log("Step error: " + JSON.stringify(e));
+                        console.error(e);
                         break;
                     }
-                    ids.push(nextId);
                 }
-
                 const decoded = tokenizer.decode(ids, { skip_special_tokens: true });
                 log(`Done. Output: "${decoded}"`);
                 document.getElementById("output").innerText = decoded;
