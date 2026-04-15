@@ -263,6 +263,7 @@
 
         const streamSessionKey = "romegpt-streamed";
         const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        const scrambleTimers = new WeakMap();
 
         function log(msg) {
             console.log(msg);
@@ -339,7 +340,17 @@
             }
         }
 
-        function scramble(el, original) {
+        function scramble(el) {
+            const original = el.dataset.scrambleOriginal || el.getAttribute("data-stream") || el.textContent;
+            if (!original) {
+                return;
+            }
+
+            const activeTimer = scrambleTimers.get(el);
+            if (activeTimer) {
+                clearInterval(activeTimer);
+            }
+
             let iter = 0;
             const interval = setInterval(() => {
                 el.textContent = original.split("").map((c, i) => {
@@ -347,15 +358,24 @@
                     if (i < iter) return original[i];
                     return chars[Math.floor(Math.random() * chars.length)];
                 }).join("");
-                if (iter >= original.length) clearInterval(interval);
+                if (iter >= original.length) {
+                    clearInterval(interval);
+                    scrambleTimers.delete(el);
+                    el.textContent = original;
+                }
                 iter += 0.5;
             }, 30);
+            scrambleTimers.set(el, interval);
         }
 
         function initScramble() {
             document.querySelectorAll(".scramble-link").forEach(el => {
-                const original = el.textContent;
-                el.addEventListener("mouseenter", () => scramble(el, original));
+                const original = el.getAttribute("data-stream") || el.textContent;
+                if (!original) {
+                    return;
+                }
+                el.dataset.scrambleOriginal = original;
+                el.addEventListener("mouseenter", () => scramble(el));
             });
         }
 
