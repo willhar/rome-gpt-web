@@ -1,92 +1,481 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RomeGPT</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.17.1/ort.min.js"></script>
+    <style>
+        :root {
+            --bg: #000000;
+            --surface: transparent;
+            --text: #ffbf47;
+            --muted: #d7a14a;
+            --accent: #ffcc66;
+            --border: rgba(255, 191, 71, 0.28);
+            --font: Consolas, "Courier New", monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            position: relative;
+        }
+
+        #noise-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.15;
+            mix-blend-mode: screen;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 980px;
+            min-height: 100vh;
+            margin: 0 auto;
+            padding: 2.5rem 1.25rem 3rem;
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            margin-bottom: 0.35rem;
+        }
+
+        .top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(2rem, 5.8vw, 3rem);
+            letter-spacing: -0.02em;
+        }
+
+        a, .scramble-link {
+            display: inline-block;
+            transition: transform 0.12s ease-out;
+            will-change: transform;
+        }
+
+        .nav {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font-size: 1rem;
+        }
+
+        .nav a {
+            color: #ffd28a;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .hl-link {
+            background: linear-gradient(#ffbf47, #ffbf47) no-repeat left bottom;
+            background-size: 0% 2px;
+            transition: background-size 0.3s ease;
+            padding-bottom: 2px;
+        }
+
+        .hl-link:hover {
+            background-size: 100% 2px;
+        }
+
+        .status {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        .hero {
+            flex: 1;
+            padding: 0;
+        }
+
+        .hero-inner {
+            width: min(100%, 620px);
+            margin: 0 auto;
+        }
+
+        .eyebrow {
+            margin: 0 0 0.45rem;
+            color: var(--muted);
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .description {
+            max-width: 68ch;
+            margin: 0 0 0.55rem;
+            color: var(--muted);
+            min-height: 3.2em;
+        }
+
+        .generator {
+            padding-top: 0;
+        }
+
+        .input-shell {
+            border: 1px solid var(--border);
+            background: rgba(255, 191, 71, 0.03);
+            padding: 0.7rem;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 90px;
+            resize: vertical;
+            border: 0;
+            outline: none;
+            background: transparent;
+            color: var(--text);
+            font: inherit;
+            line-height: 1.6;
+        }
+
+        textarea::placeholder {
+            color: var(--muted);
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 0.9rem;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            font: inherit;
+            padding: 0.65rem 1rem;
+            cursor: pointer;
+        }
+
+        button:hover:not(:disabled) {
+            background: rgba(255, 191, 71, 0.08);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 191, 71, 0.25);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            display: none;
+        }
+
+        .spinner.active {
+            display: inline-block;
+        }
+
+        .output-panel {
+            margin-top: 1rem;
+            padding-top: 0.2rem;
+            min-height: 4.5rem;
+        }
+
+        .output-label {
+            margin: 0 0 0.5rem;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        #output {
+            margin: 0;
+            white-space: pre-wrap;
+        }
+
+        .typing::after {
+            content: "▌";
+            margin-left: 0.2rem;
+            animation: blink 0.9s steps(1) infinite;
+            color: var(--accent);
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding-top: 1.5rem;
+            }
+
+            textarea {
+                min-height: 82px;
+            }
+        }
+    </style>
     <script type="module">
-        import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1";
-        
-        let session, tokenizer;
+        let session, tokenizerConfig;
+        let vocab, reverseVocab, byteDecoder;
+        let bosTokenId, eosTokenId, padTokenId;
+
+        const streamSessionKey = "romegpt-streamed";
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
         function log(msg) {
             console.log(msg);
-            document.getElementById("debug").innerText += msg + "\n";
+            const debug = document.getElementById("debug");
+            if (debug) {
+                debug.textContent += msg + "\n";
+            }
         }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function streamText(node, text) {
+            node.classList.add("typing");
+            node.textContent = "";
+            for (const ch of text) {
+                node.textContent += ch;
+                const pause = ch === " " ? 10 : ch === "." || ch === "," ? 40 : 18;
+                await sleep(pause);
+            }
+            node.classList.remove("typing");
+        }
+
+        async function initStreamText() {
+            const nodes = Array.from(document.querySelectorAll("[data-stream]"));
+            if (sessionStorage.getItem(streamSessionKey)) {
+                for (const node of nodes) {
+                    node.textContent = node.getAttribute("data-stream") || "";
+                }
+                return;
+            }
+
+            for (const node of nodes) {
+                await streamText(node, node.getAttribute("data-stream") || "");
+            }
+            sessionStorage.setItem(streamSessionKey, "1");
+        }
+
+        async function streamOutput(text) {
+            const output = document.getElementById("output");
+            output.classList.add("typing");
+            output.textContent = "";
+            for (const ch of text) {
+                output.textContent += ch;
+                const pause = ch === " " ? 6 : ch === "." || ch === "," ? 18 : 10;
+                await sleep(pause);
+            }
+            output.classList.remove("typing");
+        }
+
+        function setLoadingState(isLoading) {
+            const button = document.getElementById("generate-btn");
+            const spinner = document.getElementById("loading");
+            if (button) {
+                button.disabled = isLoading;
+            }
+            if (spinner) {
+                spinner.classList.toggle("active", isLoading);
+            }
+        }
+
+        function setStatus(text) {
+            const status = document.getElementById("status");
+            if (status) {
+                status.textContent = text;
+            }
+        }
+
+        function scramble(el, original) {
+            let iter = 0;
+            const interval = setInterval(() => {
+                el.textContent = original.split("").map((c, i) => {
+                    if (c === " ") return " ";
+                    if (i < iter) return original[i];
+                    return chars[Math.floor(Math.random() * chars.length)];
+                }).join("");
+                if (iter >= original.length) clearInterval(interval);
+                iter += 0.5;
+            }, 30);
+        }
+
+        function initScramble() {
+            document.querySelectorAll(".scramble-link").forEach(el => {
+                const original = el.textContent;
+                el.addEventListener("mouseenter", () => scramble(el, original));
+            });
+        }
+
+        function initMagnetic() {
+            const magneticEls = document.querySelectorAll("a, .scramble-link");
+            for (const btn of magneticEls) {
+                btn.addEventListener("mousemove", (e) => {
+                    const rect = btn.getBoundingClientRect();
+                    const dx = e.clientX - (rect.left + rect.width / 2);
+                    const dy = e.clientY - (rect.top + rect.height / 2);
+                    btn.style.transform = `translate(${dx * 0.25}px, ${dy * 0.25}px)`;
+                });
+                btn.addEventListener("mouseleave", () => {
+                    btn.style.transform = "";
+                });
+            }
+        }
+
+        function bytesToUnicode() {
+            const bs = [];
+            for (let i = 33; i <= 126; i++) bs.push(i);
+            for (let i = 161; i <= 172; i++) bs.push(i);
+            for (let i = 174; i <= 255; i++) bs.push(i);
+
+            const cs = [...bs];
+            let n = 0;
+            for (let i = 0; i < 256; i++) {
+                if (!bs.includes(i)) {
+                    bs.push(i);
+                    cs.push(256 + n);
+                    n++;
+                }
+            }
+
+            return Object.fromEntries(bs.map((b, i) => [String.fromCodePoint(cs[i]), b]));
+        }
+
+        function requireHttp() {
+            if (window.location.protocol === "file:") {
+                throw new Error("Open this page through a local web server, not file://");
+            }
+        }
+
+        async function fetchJson(path) {
+            requireHttp();
+            const resp = await fetch(path);
+            if (!resp.ok) {
+                throw new Error(`Failed to fetch ${path}: ${resp.status} ${resp.statusText}`);
+            }
+            return resp.json();
+        }
+
+        function getTokenId(tokenName, tokenValue) {
+            const id = vocab?.[tokenValue];
+            if (id == null) {
+                throw new Error(`Tokenizer is missing ${tokenName} token ${tokenValue}`);
+            }
+            return id;
+        }
+
         async function loadModel() {
             try {
+                setStatus("Loading model...");
                 log("Loading tokenizer...");
-                await loadTokenizer()
-                log(`Tokenizer loaded. Vocab size: ${Object.keys(vocab).length}`);
+                await loadTokenizer();
 
                 log("Loading ONNX model...");
                 session = await ort.InferenceSession.create("rome_gpt_quantized.onnx", {
-                    executionProviders: ['wasm']
+                    executionProviders: ["wasm"]
                 });
+
                 log(`Model loaded. Inputs: ${session.inputNames}, Outputs: ${session.outputNames}`);
+                setStatus("");
             } catch (e) {
                 log("ERROR during load: " + e.message);
                 console.error(e);
+                setStatus("Load failed");
             }
         }
-        let vocab, reverseVocab, bpeRanks;
 
         async function loadTokenizer() {
-            const resp = await fetch("./tokenizer.json");
-            const data = await resp.json();
-            vocab = data.model.vocab;  // token -> id
-            reverseVocab = Object.fromEntries(Object.entries(vocab).map(([k,v]) => [v,k]));
-            bpeRanks = Object.fromEntries(data.model.merges.map((m, i) => [m, i]));
-            log(`Tokenizer loaded. Vocab size: ${Object.keys(vocab).length}`);
+            const [data, config] = await Promise.all([
+                fetchJson("./tokenizer.json"),
+                fetchJson("./tokenizer_config.json"),
+            ]);
+
+            tokenizerConfig = config;
+            vocab = data.model.vocab;
+            reverseVocab = Object.fromEntries(Object.entries(vocab).map(([k, v]) => [v, k]));
+            byteDecoder = bytesToUnicode();
+            bosTokenId = getTokenId("bos", tokenizerConfig.bos_token);
+            eosTokenId = getTokenId("eos", tokenizerConfig.eos_token);
+            padTokenId = getTokenId("pad", tokenizerConfig.pad_token);
         }
 
         function decode(ids) {
-            return ids.map(id => reverseVocab[id] || "").join("").replaceAll("Ġ", " ").trim();
+            const tokenText = ids.map(id => reverseVocab[id] || "").join("");
+            const bytes = Uint8Array.from(Array.from(tokenText).map(ch => byteDecoder[ch] ?? 63));
+            return new TextDecoder("utf-8").decode(bytes).trim();
         }
 
         async function generate() {
             try {
-                const prompt = document.getElementById("prompt").value;
+                if (!session || !vocab) {
+                    setStatus("Model is not ready yet");
+                    return;
+                }
+
+                const promptEl = document.getElementById("prompt");
+                const prompt = promptEl.value.toLowerCase();
+                promptEl.value = prompt;
+                setLoadingState(true);
+                setStatus("Generating...");
+                document.getElementById("output").innerText = "";
                 log(`Generating from prompt: "${prompt}"`);
 
-                let ids = [vocab["<s>"]];  // just start with BOS token
-                log(`Starting ids: [${ids}]`);
+                let ids = [bosTokenId];
                 const vocabSize = Object.keys(vocab).length;
                 for (let i = 0; i < 100; i++) {
-                    try {
-                        // pad to length 100 with pad token id (1)
-                        const padded = new Array(100).fill(1);
-                        ids.forEach((id, idx) => padded[idx] = id);
-                        
-                        const tensor = new ort.Tensor("int64",
-                            BigInt64Array.from(padded.map(BigInt)), [1, 100]);
-                        const out = await session.run({ input_ids: tensor });
-                        const logits = out.logits.data;
-                        const vocabSize = Object.keys(vocab).length;
-                        
-                        // get logits at position of last real token
-                        const lastPos = ids.length - 1;
-                        const lastLogits = logits.slice(lastPos * vocabSize, (lastPos + 1) * vocabSize);
-                        
-                        const nextId = temperature_sample(lastLogits, 0.8);
-                        log(`Step ${i}: next token id = ${nextId}`);
-                        if (nextId === vocab["</s>"]) {
-                            log("EOS reached");
-                            break;
-                        }
-                        ids.push(nextId);
-                        if (ids.length >= 30) break;
-                    } catch(e) {
-                        log("Step error: " + JSON.stringify(e));
-                        console.error(e);
+                    const padded = new Array(100).fill(padTokenId);
+                    ids.forEach((id, idx) => {
+                        padded[idx] = id;
+                    });
+
+                    const tensor = new ort.Tensor("int64", BigInt64Array.from(padded.map(BigInt)), [1, 100]);
+                    const out = await session.run({ input_ids: tensor });
+                    const logits = out.logits.data;
+                    const lastPos = ids.length - 1;
+                    const lastLogits = logits.slice(lastPos * vocabSize, (lastPos + 1) * vocabSize);
+
+                    const nextId = temperature_sample(lastLogits, 0.8);
+                    if (nextId === eosTokenId) {
                         break;
                     }
+                    ids.push(nextId);
+                    if (ids.length >= 30) break;
                 }
-                const decoded = tokenizer.decode(ids, { skip_special_tokens: true });
-                log(`Done. Output: "${decoded}"`);
-                document.getElementById("output").innerText = decoded;
+
+                const decoded = decode(ids.filter(id => id !== bosTokenId && id !== eosTokenId && id !== padTokenId));
+                await streamOutput(decoded);
+                setStatus("");
             } catch (e) {
                 log("ERROR during generation: " + e.message);
                 console.error(e);
+                setStatus("Generation failed");
+            } finally {
+                setLoadingState(false);
             }
         }
 
@@ -105,14 +494,83 @@
             return probs.length - 1;
         }
 
+        function generateNoise(canvas) {
+            const ctx = canvas.getContext("2d");
+            const w = canvas.width;
+            const h = canvas.height;
+            const img = ctx.createImageData(w, h);
+            for (let i = 0; i < img.data.length; i += 4) {
+                const v = Math.random() * 255;
+                img.data[i] = v;
+                img.data[i + 1] = v;
+                img.data[i + 2] = v;
+                img.data[i + 3] = 255;
+            }
+            ctx.putImageData(img, 0, 0);
+        }
+
+        function initNoise() {
+            const noiseCanvas = document.getElementById("noise-canvas");
+            const resize = () => {
+                noiseCanvas.width = window.innerWidth;
+                noiseCanvas.height = window.innerHeight;
+                generateNoise(noiseCanvas);
+            };
+            resize();
+            window.addEventListener("resize", resize);
+        }
+
         window.generate = generate;
-        loadModel();
+
+        window.addEventListener("DOMContentLoaded", async () => {
+            initNoise();
+            initStreamText();
+            document.querySelectorAll("a").forEach(el => el.classList.add("hl-link"));
+            initScramble();
+            initMagnetic();
+            loadModel();
+        });
     </script>
 </head>
 <body>
-    <input id="prompt" type="text" placeholder="Enter prompt..." />
-    <button onclick="generate()">Generate</button>
-    <p id="output"></p>
-    <pre id="debug" style="background:#111;color:#0f0;padding:10px;font-size:12px;max-height:300px;overflow-y:auto;"></pre>
+    <canvas id="noise-canvas" aria-hidden="true"></canvas>
+    <div class="container">
+        <header>
+            <div class="top-row">
+                <h1 class="scramble-link" data-stream="RomeGPT"></h1>
+                <div class="nav">
+                    <a href="https://willhar.com" target="_blank" rel="noopener noreferrer">Home</a>
+                    <div class="status" id="status"></div>
+                </div>
+            </div>
+        </header>
+
+        <main class="hero">
+            <div class="hero-inner">
+                <p class="eyebrow" data-stream="A 20MB Transformer, From Ancient Rome"></p>
+                <p class="description" data-stream="The goal of this project was to make a simple transformer using texts from authors like Caesar, Cicero, and Pliny. 
+                However, with only 20MB of space (after quantizing), the model struggles to learn grammar rules. See if you can get it to output anything interesting!"
+
+                >
+
+                </p>
+
+                <section class="generator">
+                    <div class="input-shell">
+                        <textarea id="prompt" placeholder="Enter your prompt here..."></textarea>
+                    </div>
+                    <div class="controls">
+                        <button id="generate-btn" onclick="generate()">Generate</button>
+                        <span id="loading" class="spinner" aria-hidden="true"></span>
+                    </div>
+                    <div class="output-panel">
+                        <p class="output-label">Output</p>
+                        <p id="output"></p>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <pre id="debug" hidden></pre>
 </body>
 </html>
