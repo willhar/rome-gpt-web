@@ -40,7 +40,8 @@
         }
 
         .container {
-            max-width: 980px;
+            width: 75%;
+            max-width: 1400px;
             min-height: 100vh;
             margin: 0 auto;
             padding: 2.5rem 1.25rem 3rem;
@@ -109,7 +110,7 @@
         }
 
         .hero-inner {
-            width: min(100%, 620px);
+            width: 100%;
             margin: 0 auto;
         }
 
@@ -119,13 +120,15 @@
             font-size: 0.95rem;
             text-transform: uppercase;
             letter-spacing: 0.08em;
+            text-align: center;
         }
 
         .description {
-            max-width: 68ch;
-            margin: 0 0 0.55rem;
+            max-width: 96ch;
+            margin: 0 auto 0.55rem;
             color: var(--muted);
             min-height: 3.2em;
+            text-align: center;
         }
 
         .generator {
@@ -211,6 +214,22 @@
             white-space: pre-wrap;
         }
 
+        .output-divider {
+            margin: 1.25rem 0 1rem;
+            border: 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .editable-text {
+            margin: 0 auto;
+            width: 100%;
+            max-width: 140ch;
+            padding: 1rem 1.25rem;
+            color: var(--muted);
+            white-space: pre-line;
+            line-height: 1.75;
+        }
+
         .typing::after {
             content: "▌";
             margin-left: 0.2rem;
@@ -228,6 +247,7 @@
 
         @media (max-width: 640px) {
             .container {
+                width: 100%;
                 padding-top: 1.5rem;
             }
 
@@ -256,9 +276,16 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        async function streamText(node, text) {
-            node.classList.add("typing");
+        function reserveStreamHeight(node, text) {
+            node.style.minHeight = "0px";
+            node.textContent = text;
+            node.style.minHeight = `${node.offsetHeight}px`;
             node.textContent = "";
+        }
+
+        async function streamText(node, text) {
+            reserveStreamHeight(node, text);
+            node.classList.add("typing");
             for (const ch of text) {
                 node.textContent += ch;
                 const pause = ch === " " ? 10 : ch === "." || ch === "," ? 40 : 18;
@@ -284,8 +311,8 @@
 
         async function streamOutput(text) {
             const output = document.getElementById("output");
+            reserveStreamHeight(output, text);
             output.classList.add("typing");
-            output.textContent = "";
             for (const ch of text) {
                 output.textContent += ch;
                 const pause = ch === " " ? 6 : ch === "." || ch === "," ? 18 : 10;
@@ -550,7 +577,7 @@
                 <p class="eyebrow" data-stream="A 20MB Transformer, From Ancient Rome"></p>
                 <p class="description" data-stream="The goal of this project was to make a simple transformer using texts from authors like Caesar, Cicero, and Pliny. 
                 However, with only 20MB of space (after quantizing), the model struggles to learn the English language. See if you can get it to output anything interesting!
-                Who"
+                "
                 
                 >
 
@@ -567,6 +594,20 @@
                     <div class="output-panel">
                         <p class="output-label">Output</p>
                         <p id="output"></p>
+                        <hr class="output-divider" />
+                        <p class="editable-text">
+                            A step by step explanation of what happens inside the model:
+
+                            1) The user inputs some text, which is converted to lowercase (the model was trained on lowercase text only, hence the output)
+                            2) All text is tokenized, or turned into numbers (i.e: "who is caesar?" becomes [14, 623, 1237, 124]). This model uses a vocabulary size of 3000, which means it only knows 3000 different combinations of text bytes. The ones it doesn't know get classified as "unknown" tokens.
+                            3) Each token gets a learned embedding value. The embedding is how the model knows what a token "means", so synonyms like "fight" and "battle" would have similar embedding values. The embedding is a vector of 512 values.
+                            4) Then each token receives a positional embedding, which is some 512-dimension vector based on its position in the sequence. A more advanced model would use relative position embeddings rather than learned ones.
+                            Side note: why do we need to tell the model each token's position? You need to understand the attention mechanism to understand this, but basically the model doesn't know the ordering of the tokens, and you need to tell it. Read "Attention is All You Need" for more info on this.
+                            5) Then the embedded representations of all the input tokens go through 6 layers of transformers. Each transformer layer is a multi-head attention block followed by some linear layers that expand then collapse the dimensionality (which stays constant between layers). 
+                            6) After passing through all the transformers, the transformed input goes to a final linear layer that predicts the next token. 
+
+                            This is simplified, and ignores all the activation functions, layer norms, and skip connections, but this covers the important aspects. RomeGPT is very basic and small (22.3M params), compared to Claude or ChatGPT, whos parameter counts are not public but likely number in the trillions.
+                            This isn't fact, but you probably need >1B parameters to make a chatbot that can mostly work for English. Training one of these from scratch on consumer GPUs (which I used for this model, and they took over an hour just to train this version of the model!) isn't the most practical. But, I wanted to try it, and therefore RomeGPT was made.                       </p>
                     </div>
                 </section>
             </div>
